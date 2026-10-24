@@ -35,8 +35,8 @@ sandbox merchants and researcher owned sandbox orders. No third party is involve
     <label>Attacker sandbox access token</label><input id="tok" autocomplete="off" value="A21AAJNC3KWtpmMHwzGuSvMVL4SKTdF_cPIoFk5KnUgWvbNaqEZyH-ypgYJaCDPZcj-5SE3HwmQREnLipM1LTQ9Pwm2lSFOmg">
   </div>
   <div>
-    <label>ATTACKER order ID (should end up funded)</label><input id="oid" autocomplete="off" value="55K74760VA716451V">
-    <label>MERCHANT order ID (should stay unpaid)</label><input id="moid" autocomplete="off" value="2L032600BN0574148">
+    <label>ATTACKER order ID (should end up funded)</label><input id="oid" autocomplete="off" value="39102959MW148624E">
+    <label>MERCHANT order ID (should stay unpaid)</label><input id="moid" autocomplete="off" value="20H13843AC0337358">
   </div>
 </div>
 
@@ -167,12 +167,14 @@ async function refresh() {
     v.style.display = 'block';
     if (funded) {
       v.className = 'hit';
-      v.innerHTML = '<b>Impact:</b> the shopper entered one card on <code>' + $('merchant') +
-        '</code> and the order that got funded is <b>' + $('oid') + '</b> (' + A.status + '), payee <b>' +
-        (A.payee || '?') + '</b>.<br>The merchant order <b>' + $('moid') + '</b> is still <b>' + M.status +
-        '</b>, payee <b>' + (M.payee || '?') + '</b>, so the shop was never paid.<br>' +
+      v.innerHTML = '<b>Impact:</b> the shopper typed <b>one</b> card into <code>' + $('merchant') +
+        '</code> and pressed Pay once.<br>' +
+        'That single entry authorised <b>two</b> orders: the merchant's <b>' + $('moid') + '</b> (' + M.status +
+        ') and the attacker's <b>' + $('oid') + '</b> (<b>' + A.status + '</b>), which the shopper never saw ' +
+        'and the merchant never created.<br>' +
+        'The attacker can now capture their order and take the money.<br>' +
         'Card data seen by this attacker page: <b>' + (leaked ? 'SOME (check log)' : 'NONE') +
-        '</b>. The card never leaves PayPal\'s iframes; only the authorization is redirected.' +
+        '</b> &mdash; the card never leaves PayPal's iframes, only the authorisation is redirected.' +
         (A.payee && M.payee && A.payee === M.payee
           ? '<br><span class="mute">Note: both orders belong to the same sandbox merchant in this run.</span>' : '');
     } else {
