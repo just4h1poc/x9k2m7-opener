@@ -169,12 +169,12 @@ async function refresh() {
       v.className = 'hit';
       v.innerHTML = '<b>Impact:</b> the shopper typed <b>one</b> card into <code>' + $('merchant') +
         '</code> and pressed Pay once.<br>' +
-        'That single entry authorised <b>two</b> orders: the merchant's <b>' + $('moid') + '</b> (' + M.status +
-        ') and the attacker's <b>' + $('oid') + '</b> (<b>' + A.status + '</b>), which the shopper never saw ' +
+        'That single entry authorised <b>two</b> orders: the merchant order <b>' + $('moid') + '</b> (' + M.status +
+        ') and the attacker order <b>' + $('oid') + '</b> (<b>' + A.status + '</b>), which the shopper never saw ' +
         'and the merchant never created.<br>' +
-        'The attacker can now capture their order and take the money.<br>' +
+        'The attacker can now capture that order and take the money.<br>' +
         'Card data seen by this attacker page: <b>' + (leaked ? 'SOME (check log)' : 'NONE') +
-        '</b> &mdash; the card never leaves PayPal's iframes, only the authorisation is redirected.' +
+        '</b> &mdash; the card never leaves the PayPal iframes, only the authorisation is redirected.' +
         (A.payee && M.payee && A.payee === M.payee
           ? '<br><span class="mute">Note: both orders belong to the same sandbox merchant in this run.</span>' : '');
     } else {
