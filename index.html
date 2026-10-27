@@ -32,11 +32,11 @@ sandbox merchants and researcher owned sandbox orders. No third party is involve
 <div class="grid">
   <div>
     <label>Attacker sandbox client ID</label><input id="cid" autocomplete="off" value="BAAZJk4mOoefN6A2YKUmdHRRlhYabTO5vRj1Zo4V35GtvNmqPuVB1r4vF1meT2cov1ob6FKyg4pqpadkLc">
-    <label>Attacker sandbox access token</label><input id="tok" autocomplete="off" value="A21AAJeZSuIjM5fa03IROh0iHb9uj3XRYPTG7K5gImG0v6Xv4epQ0ayltVpP3QYml2-J-DlHOCYRMvs1Mq71YXSjbkcjWMIAg">
+    <label>Attacker sandbox access token</label><input id="tok" autocomplete="off" value="A21AAKXSnJxhJkRZe1NO4IsakVh2iTxYUL11LeyPJZqJ7J3CaFgoD_unNwrwsM8NmCHTIIlbL_gIe6KpPif-qcwIbQcOt4CqA">
   </div>
   <div>
-    <label>ATTACKER order ID (should end up funded)</label><input id="oid" autocomplete="off" value="3NB56161WR2632919">
-    <label>MERCHANT order ID (should stay unpaid)</label><input id="moid" autocomplete="off" value="023375745K2959637">
+    <label>ATTACKER order ID (should end up funded)</label><input id="oid" autocomplete="off" value="2RE197667G919200W">
+    <label>MERCHANT order ID (should stay unpaid)</label><input id="moid" autocomplete="off" value="9UH89970P9068305D">
   </div>
 </div>
 
@@ -127,7 +127,12 @@ window.addEventListener('message', (e) => {
 
 document.getElementById('open').addEventListener('click', () => {
   const u = new URL($('merchant'));
-  if ($('cid')) u.searchParams.set('client-id', $('cid'));
+  // Only fill in a client-id when the merchant URL does not carry its own. It used to overwrite
+  // unconditionally, which silently broke every two account test: the triager pasted THEIR client
+  // id here, it replaced the merchant's in the URL, and the merchant page then paired that id with
+  // the baked client-token of a different merchant. Hosted Fields still rendered (eligibility only
+  // reads the client id) and the submit failed with no usable message.
+  if ($('cid') && !u.searchParams.get('client-id')) u.searchParams.set('client-id', $('cid'));
   window.open(u.toString(), 'checkout-' + Date.now());
   log('opened ' + u.toString());
   log('this page is now window.opener for that tab');
