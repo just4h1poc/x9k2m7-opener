@@ -143,6 +143,8 @@ window.addEventListener('message', (e) => {
     setTimeout(refresh, 1200);
   }
 
+});
+
 // Preflight: does the ATTACKER account actually accept cards? Creates one throwaway sandbox order
 // on that account and confirms the official test card against it. This is the exact call the
 // tokenization frame makes, so it reproduces the failure (or rules it out) in isolation.
@@ -172,7 +174,6 @@ document.getElementById('precheck').addEventListener('click', async () => {
   } catch (e) {
     out.textContent = 'precheck failed to run: ' + (e && e.message);
   }
-});
 });
 
 document.getElementById('open').addEventListener('click', () => {
